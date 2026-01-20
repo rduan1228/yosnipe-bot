@@ -123,7 +123,7 @@ client.on('ready', async () => {
     
     // Register commands to your guild
     await rest.put(
-      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
+      Routes.applicationCommands(client.user.id),
       { body: commands },
     );
     
