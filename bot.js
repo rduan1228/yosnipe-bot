@@ -123,7 +123,7 @@ client.on('ready', async () => {
     
     // Register commands to your guild
     await rest.put(
-      Routes.applicationCommands(client.user.id),
+      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
       { body: commands },
     );
     
@@ -160,9 +160,15 @@ client.on('interactionCreate', async (interaction) => {
       await recordSnipe(interaction.user.id, target.id);
       const stats = await getUserStats(interaction.user.id);
       
+      // Send ephemeral confirmation to the sniper
       await interaction.reply({ 
         content: `🎯 Successfully sniped ${target.username}! Total snipes: ${stats.total_snipes}`, 
         ephemeral: true 
+      });
+
+      // Ping the victim in the channel
+      await interaction.channel.send({
+        content: `${target} just got sniped by ${interaction.user}! 💥`
       });
     } catch (error) {
       console.error('Error recording snipe:', error);
