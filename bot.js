@@ -134,8 +134,12 @@ client.on('ready', async () => {
     console.log('Started refreshing application (/) commands.');
     
     // Register commands to your guild
+    // await rest.put(
+    //   Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
+    //   { body: commands },
+    // );
     await rest.put(
-      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
+      Routes.applicationCommands(client.user.id),
       { body: commands },
     );
     
