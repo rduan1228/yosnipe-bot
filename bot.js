@@ -39,6 +39,14 @@ async function recordSnipe(sniperId, targetId) {
   return result.rows[0].id;
 }
 
+async function removeLastSnipe(sniperId) {
+  const result = await pool.query(
+    'DELETE FROM snipes WHERE id = (SELECT id FROM snipes WHERE sniper_id = $1 ORDER BY timestamp DESC LIMIT 1) RETURNING target_id',
+    [sniperId]
+  );
+  return result.rows[0];
+}
+
 async function getUserStats(userId) {
   const result = await pool.query(
     `SELECT 
@@ -83,6 +91,10 @@ const commands = [
       option.setName('target')
         .setDescription('The user you sniped')
         .setRequired(true)),
+  
+  new SlashCommandBuilder()
+    .setName('unsnipe')
+    .setDescription('Remove your last logged snipe'),
   
   new SlashCommandBuilder()
     .setName('snipestats')
@@ -166,14 +178,43 @@ client.on('interactionCreate', async (interaction) => {
         ephemeral: true 
       });
 
-      // Ping the victim in the channel
-      await interaction.channel.send({
-        content: `${target} just got sniped by ${interaction.user}! 💥`
-      });
+      // Try to DM the victim
+      try {
+        await target.send(`You just got sniped by ${interaction.user.username}! 💥`);
+      } catch (dmError) {
+        // If DM fails (user has DMs disabled), silently fail
+        console.log(`Could not DM ${target.username}`);
+      }
     } catch (error) {
       console.error('Error recording snipe:', error);
       await interaction.reply({ 
         content: 'Error recording snipe. Please try again.', 
+        ephemeral: true 
+      });
+    }
+  }
+
+  // /unsnipe command
+  if (commandName === 'unsnipe') {
+    try {
+      const removed = await removeLastSnipe(interaction.user.id);
+      
+      if (!removed) {
+        return interaction.reply({ 
+          content: 'You have no snipes to remove!', 
+          ephemeral: true 
+        });
+      }
+
+      const victim = await client.users.fetch(removed.target_id);
+      await interaction.reply({ 
+        content: `✅ Removed your last snipe against ${victim.username}`, 
+        ephemeral: true 
+      });
+    } catch (error) {
+      console.error('Error removing snipe:', error);
+      await interaction.reply({ 
+        content: 'Error removing snipe. Please try again.', 
         ephemeral: true 
       });
     }
@@ -270,6 +311,7 @@ client.on('interactionCreate', async (interaction) => {
       .setDescription('Track your snipes and dominate the leaderboard!')
       .addFields(
         { name: '/snipe @user', value: 'Log a snipe against the mentioned user' },
+        { name: '/unsnipe', value: 'Remove your last logged snipe (in case of typo)' },
         { name: '/snipestats [@user]', value: 'View snipe statistics for yourself or another user' },
         { name: '/leaderboard [type]', value: 'View top snipers or most sniped victims (public)' },
         { name: '/help', value: 'Show this help message' }
