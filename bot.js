@@ -282,9 +282,9 @@ client.on('interactionCreate', async (interaction) => {
           }
         }));
 
-        const kd = parseInt(stats.times_sniped) > 0 
-          ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2) 
-          : stats.total_snipes;
+        const kd = parseInt(stats.times_sniped) > 0
+          ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
+          : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
 
         const embed = new EmbedBuilder()
           .setColor('#FF6B6B')
