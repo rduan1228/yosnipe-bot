@@ -262,42 +262,64 @@ client.on('interactionCreate', async (interaction) => {
     const type = interaction.options.getString('type') || 'snipers';
 
     try {
+      // Defer reply since we need to fetch users
+      await interaction.deferReply({ ephemeral: false });
+
       if (type === 'snipers') {
         const leaderboard = await getTopSnipers(10);
+
+        // Fetch all users
+        const leaderboardWithUsers = await Promise.all(
+          leaderboard.map(async (entry, i) => {
+            try {
+              const user = await client.users.fetch(entry.sniper_id);
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+              return `${medal} **${user.username}** - ${entry.count} snipes`;
+            } catch (err) {
+              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+              return `${medal} **Unknown User** - ${entry.count} snipes`;
+            }
+          })
+        );
 
         const embed = new EmbedBuilder()
           .setColor('#4CAF50')
           .setTitle('🏆 TOP SNIPERS LEADERBOARD')
           .setDescription(leaderboard.length === 0 ? 'No snipes recorded yet!' : 
-            leaderboard.map((entry, i) => {
-              const user = client.users.cache.get(entry.sniper_id);
-              const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-              return `${medal} **${user?.username || 'Unknown'}** - ${entry.count} snipes`;
-            }).join('\n'))
+            leaderboardWithUsers.join('\n'))
           .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: false });
+        await interaction.editReply({ embeds: [embed] });
       } else if (type === 'victims') {
         const leaderboard = await getTopVictims(10);
+
+        // Fetch all users
+        const leaderboardWithUsers = await Promise.all(
+          leaderboard.map(async (entry, i) => {
+            try {
+              const user = await client.users.fetch(entry.target_id);
+              const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
+              return `${medal} **${user.username}** - ${entry.count} times sniped`;
+            } catch (err) {
+              const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
+              return `${medal} **Unknown User** - ${entry.count} times sniped`;
+            }
+          })
+        );
 
         const embed = new EmbedBuilder()
           .setColor('#F44336')
           .setTitle('💀 MOST SNIPED VICTIMS')
           .setDescription(leaderboard.length === 0 ? 'No snipes recorded yet!' : 
-            leaderboard.map((entry, i) => {
-              const user = client.users.cache.get(entry.target_id);
-              const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
-              return `${medal} **${user?.username || 'Unknown'}** - ${entry.count} times sniped`;
-            }).join('\n'))
+            leaderboardWithUsers.join('\n'))
           .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: false });
+        await interaction.editReply({ embeds: [embed] });
       }
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
-      await interaction.reply({ 
-        content: 'Error fetching leaderboard. Please try again.', 
-        ephemeral: true 
+      await interaction.editReply({ 
+        content: 'Error fetching leaderboard. Please try again.'
       });
     }
   }
