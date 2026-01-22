@@ -178,17 +178,12 @@ client.on('interactionCreate', async (interaction) => {
       
       // Send ephemeral confirmation to the sniper
       await interaction.reply({ 
-        content: `🎯 Successfully sniped ${target.username}! Total snipes: ${stats.total_snipes}`, 
+        content: `🎯 Snipe recorded! Total snipes: ${stats.total_snipes}`, 
         ephemeral: true 
       });
 
-      // Try to DM the victim
-      try {
-        await target.send(`You just got sniped by ${interaction.user.username}! 💥`);
-      } catch (dmError) {
-        // If DM fails (user has DMs disabled), silently fail
-        console.log(`Could not DM ${target.username}`);
-      }
+      // Send public message to the channel
+      await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
     } catch (error) {
       console.error('Error recording snipe:', error);
       await interaction.reply({ 
