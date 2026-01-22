@@ -261,8 +261,8 @@ client.on('interactionCreate', async (interaction) => {
         );
         const topVictims = await Promise.all(topVictimsResult.rows.map(async (entry) => {
           try {
-            const user = await client.users.fetch(entry.target_id);
-            return `**${user.username}** (${entry.count})`;
+            const member = await interaction.guild.members.fetch(entry.target_id);
+            return `**${member.displayName}** (${entry.count})`;
           } catch {
             return `**Unknown** (${entry.count})`;
           }
@@ -275,8 +275,8 @@ client.on('interactionCreate', async (interaction) => {
         );
         const topOps = await Promise.all(topOpsResult.rows.map(async (entry) => {
           try {
-            const user = await client.users.fetch(entry.sniper_id);
-            return `**${user.username}** (${entry.count})`;
+            const member = await interaction.guild.members.fetch(entry.sniper_id);
+            return `**${member.displayName}** (${entry.count})`;
           } catch {
             return `**Unknown** (${entry.count})`;
           }
