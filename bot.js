@@ -293,8 +293,26 @@ client.on('interactionCreate', async (interaction) => {
             { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
             { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
             { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
-            { name: '🔝 Top Victims', value: topVictims.length > 0 ? topVictims.join('\n') : 'None', inline: false },
-            { name: '🔎 Top Ops', value: topOps.length > 0 ? topOps.join('\n') : 'None', inline: false }
+            {
+              name: '🔝 Top Victims',
+              value: topVictims.length > 0
+                ? topVictims.slice(0, 3).map((v, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                    return `${medal} ${v}`;
+                  }).join(' | ')
+                : 'None',
+              inline: true
+            },
+            {
+              name: '🔎 Top Ops',
+              value: topOps.length > 0
+                ? topOps.slice(0, 3).map((v, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                    return `${medal} ${v}`;
+                  }).join(' | ')
+                : 'None',
+              inline: true
+            }
           )
           .setTimestamp();
 
