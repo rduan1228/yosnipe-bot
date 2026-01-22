@@ -183,7 +183,7 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       // Send public message to the channel
-      await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
+      await interaction.channel.send(`${interaction.user} just sniped ${target}! 💥`);
     } catch (error) {
       console.error('Error recording snipe:', error);
       await interaction.reply({ 
