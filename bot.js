@@ -96,6 +96,25 @@ async function getOps(userid, limit = 3) {
   return result.rows;
 }
 
+async function getSnipeStreak(userId) {
+  const result = await pool.query(
+    `
+    WITH last_death AS (
+      SELECT MAX(id) AS last_death_id
+      FROM snipes
+      WHERE target_id = $1
+    )
+    SELECT COUNT(*) AS streak
+    FROM snipes
+    WHERE sniper_id = $1
+      AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
+    `,
+    [userId]
+  );
+
+  return Number(result.rows[0].streak);
+}
+
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
@@ -196,6 +215,7 @@ client.on('interactionCreate', async (interaction) => {
     try {
       await recordSnipe(interaction.user.id, target.id);
       const stats = await getUserStats(interaction.user.id);
+      const streak = await getSnipeStreak(interaction.user.id);
       
       // Send ephemeral confirmation to the sniper
       await interaction.reply({ 
@@ -205,6 +225,12 @@ client.on('interactionCreate', async (interaction) => {
 
       // Send public message to the channel
       await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
+      // Public hype message
+      if (streak >= 2) {
+        await interaction.channel.send(
+          `🔥 ${interaction.user} is on a **${streak}-snipe streak!**`
+        );
+      }
     } catch (error) {
       console.error('Error recording snipe:', error);
       await interaction.reply({ 
@@ -254,6 +280,8 @@ client.on('interactionCreate', async (interaction) => {
           });
         }
 
+        const streak = await getSnipeStreak(target.id);
+
         // Fetch top 3 victims (people this user has sniped the most)
         const topVictimsResult = await pool.query(
           `SELECT target_id, COUNT(*) as count FROM snipes WHERE sniper_id = $1 GROUP BY target_id ORDER BY count DESC LIMIT 3`,
@@ -293,6 +321,7 @@ client.on('interactionCreate', async (interaction) => {
             { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
             { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
             { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
+            { name: '🔥 Current Streak', value: `${streak}`, inline: true },
             {
               name: '🔝 Top Victims',
               value: topVictims.length > 0
