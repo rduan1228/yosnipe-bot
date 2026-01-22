@@ -82,6 +82,19 @@ async function getTopVictims(limit = 10) {
   return result.rows;
 }
 
+async function getOps(userid, limit = 3) {
+  const result = await pool.query(
+    `SELECT sniper_id, COUNT(*) as count 
+     FROM snipes 
+     WHERE target_id = $1
+     GROUP BY sniper_id 
+     ORDER BY count DESC 
+     LIMIT $2`,
+    [userid, limit]
+  );
+  return result.rows;
+}
+
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
@@ -115,6 +128,13 @@ const commands = [
           { name: 'Top Snipers', value: 'snipers' },
           { name: 'Most Sniped Victims', value: 'victims' }
         )),
+  new SlashCommandBuilder()
+    .setName('ops')
+    .setDescription('Get who sniped you the most')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('User to check stats for (defaults to you)')
+        .setRequired(false)),
   
   new SlashCommandBuilder()
     .setName('help')
@@ -302,6 +322,40 @@ client.on('interactionCreate', async (interaction) => {
       console.error('Error fetching leaderboard:', error);
       await interaction.reply({ 
         content: 'Error fetching leaderboard. Please try again.', 
+        ephemeral: true 
+      });
+    }
+  }
+
+  // /leaderboard command
+  if (commandName === 'ops') {
+    const target = interaction.options.getUser('user') || interaction.user;
+
+    const opponents = await getOps(target.id, 3);
+    try {
+      if (!opponents || opponents.length === 0) { 
+        return interaction.reply({ 
+          content: `${target.username} has not been sniped!`, 
+          ephemeral: true 
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor('#d56bffff')
+        .setTitle(`🔎 Top Ops for ${target.username}`)
+        .setDescription(
+            opponents.map((entry, i) => {
+              const user = client.users.cache.get(entry.sniper_id);
+              const medal = i === 0 ? '1️⃣' : i === 1 ? '2️⃣' : i === 2 ? '3️⃣' : `${i + 1}.`;
+              return `${medal} **${user?.username || 'Unknown'}** - ${entry.count} snipes`;
+            }).join('\n'))
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (error) {
+      console.error('Error fetching ops:', error);
+      await interaction.reply({ 
+        content: 'Error fetching ops. Please try again.', 
         ephemeral: true 
       });
     }
