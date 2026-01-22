@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -183,7 +184,7 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       // Send public message to the channel
-      await interaction.channel.send(`${interaction.user} just sniped ${target}! 💥`);
+      await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
     } catch (error) {
       console.error('Error recording snipe:', error);
       await interaction.reply({ 
@@ -268,13 +269,14 @@ client.on('interactionCreate', async (interaction) => {
       if (type === 'snipers') {
         const leaderboard = await getTopSnipers(10);
 
-        // Fetch all users
+        // Fetch all users and get their server nicknames
         const leaderboardWithUsers = await Promise.all(
           leaderboard.map(async (entry, i) => {
             try {
-              const user = await client.users.fetch(entry.sniper_id);
+              const member = await interaction.guild.members.fetch(entry.sniper_id);
+              const displayName = member.displayName; // This gets server nickname or username
               const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-              return `${medal} **${user.username}** - ${entry.count} snipes`;
+              return `${medal} **${displayName}** - ${entry.count} snipes`;
             } catch (err) {
               const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
               return `${medal} **Unknown User** - ${entry.count} snipes`;
@@ -293,13 +295,14 @@ client.on('interactionCreate', async (interaction) => {
       } else if (type === 'victims') {
         const leaderboard = await getTopVictims(10);
 
-        // Fetch all users
+        // Fetch all users and get their server nicknames
         const leaderboardWithUsers = await Promise.all(
           leaderboard.map(async (entry, i) => {
             try {
-              const user = await client.users.fetch(entry.target_id);
+              const member = await interaction.guild.members.fetch(entry.target_id);
+              const displayName = member.displayName; // This gets server nickname or username
               const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
-              return `${medal} **${user.username}** - ${entry.count} times sniped`;
+              return `${medal} **${displayName}** - ${entry.count} times sniped`;
             } catch (err) {
               const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
               return `${medal} **Unknown User** - ${entry.count} times sniped`;
