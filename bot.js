@@ -299,7 +299,7 @@ client.on('interactionCreate', async (interaction) => {
                 ? topVictims.slice(0, 3).map((v, i) => {
                     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
                     return `${medal} ${v}`;
-                  }).join(' | ')
+                  }).join(' \n ')
                 : 'None',
               inline: true
             },
@@ -309,7 +309,7 @@ client.on('interactionCreate', async (interaction) => {
                 ? topOps.slice(0, 3).map((v, i) => {
                     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
                     return `${medal} ${v}`;
-                  }).join(' | ')
+                  }).join(' \n ')
                 : 'None',
               inline: true
             }
