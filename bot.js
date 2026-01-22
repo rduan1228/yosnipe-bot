@@ -277,7 +277,8 @@ client.on('interactionCreate', async (interaction) => {
 
       const row = new ActionRowBuilder().addComponents(showoffButton);
 
-      await interaction.reply({ embeds: [embed], ephemeral: true, components: [row] });
+      // Only show the button first
+      await interaction.reply({ content: 'Press the button to view your snipe stats!', ephemeral: true, components: [row] });
 
       // Create a collector for the button
       const message = await interaction.fetchReply();
@@ -287,8 +288,7 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       collector.on('collect', async i => {
-        await i.deferUpdate();
-        await interaction.channel.send(`📊 ${interaction.user} is showing off: **${target.username}** has ${stats.total_snipes} snipes, ${stats.times_sniped} times sniped, with a K/D ratio of ${kd}! 🔥`);
+        await i.update({ embeds: [embed], ephemeral: true, components: [] });
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
