@@ -240,63 +240,63 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // /snipestats command
-  if (commandName === 'snipestats') {
-    const target = interaction.options.getUser('user') || interaction.user;
+    // /snipestats command
+    if (commandName === 'snipestats') {
+      const target = interaction.options.getUser('user') || interaction.user;
 
-    try {
-      const stats = await getUserStats(target.id);
+      try {
+        const stats = await getUserStats(target.id);
 
-      if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
-        return interaction.reply({ 
-          content: `${target.username} has no snipe activity yet!`, 
-          ephemeral: true 
-        });
-      }
-
-      // Fetch top 3 victims (people this user has sniped the most)
-      const topVictimsResult = await pool.query(
-        `SELECT target_id, COUNT(*) as count FROM snipes WHERE sniper_id = $1 GROUP BY target_id ORDER BY count DESC LIMIT 3`,
-        [target.id]
-      );
-      const topVictims = await Promise.all(topVictimsResult.rows.map(async (entry) => {
-        try {
-          const user = await client.users.fetch(entry.target_id);
-          return `**${user.username}** (${entry.count})`;
-        } catch {
-          return `**Unknown** (${entry.count})`;
+        if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
+          return interaction.reply({ 
+            content: `${target.username} has no snipe activity yet!`, 
+            ephemeral: true 
+          });
         }
-      }));
 
-      // Fetch top 3 ops (people who sniped this user the most)
-      const topOpsResult = await pool.query(
-        `SELECT sniper_id, COUNT(*) as count FROM snipes WHERE target_id = $1 GROUP BY sniper_id ORDER BY count DESC LIMIT 3`,
-        [target.id]
-      );
-      const topOps = await Promise.all(topOpsResult.rows.map(async (entry) => {
-        try {
-          const user = await client.users.fetch(entry.sniper_id);
-          return `**${user.username}** (${entry.count})`;
-        } catch {
-          return `**Unknown** (${entry.count})`;
-        }
-      }));
+        // Fetch top 3 victims (people this user has sniped the most)
+        const topVictimsResult = await pool.query(
+          `SELECT target_id, COUNT(*) as count FROM snipes WHERE sniper_id = $1 GROUP BY target_id ORDER BY count DESC LIMIT 3`,
+          [target.id]
+        );
+        const topVictims = await Promise.all(topVictimsResult.rows.map(async (entry) => {
+          try {
+            const user = await client.users.fetch(entry.target_id);
+            return `**${user.username}** (${entry.count})`;
+          } catch {
+            return `**Unknown** (${entry.count})`;
+          }
+        }));
 
-      const kd = parseInt(stats.times_sniped) > 0 
-        ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2) 
-        : stats.total_snipes;
+        // Fetch top 3 ops (people who sniped this user the most)
+        const topOpsResult = await pool.query(
+          `SELECT sniper_id, COUNT(*) as count FROM snipes WHERE target_id = $1 GROUP BY sniper_id ORDER BY count DESC LIMIT 3`,
+          [target.id]
+        );
+        const topOps = await Promise.all(topOpsResult.rows.map(async (entry) => {
+          try {
+            const user = await client.users.fetch(entry.sniper_id);
+            return `**${user.username}** (${entry.count})`;
+          } catch {
+            return `**Unknown** (${entry.count})`;
+          }
+        }));
 
-      const embed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle(`📊 Snipe Stats for ${target.username}`)
-        .addFields(
-          { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
-          { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
-          { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
-          { name: '🔝 Top Victims', value: topVictims.length > 0 ? topVictims.join('\n') : 'None', inline: false },
-          { name: '🔎 Top Ops', value: topOps.length > 0 ? topOps.join('\n') : 'None', inline: false }
-        )
-        .setTimestamp();
+        const kd = parseInt(stats.times_sniped) > 0 
+          ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2) 
+          : stats.total_snipes;
+
+        const embed = new EmbedBuilder()
+          .setColor('#FF6B6B')
+          .setTitle(`📊 Snipe Stats for ${target.username}`)
+          .addFields(
+            { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
+            { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
+            { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
+            { name: '🔝 Top Victims', value: topVictims.length > 0 ? topVictims.join('\n') : 'None', inline: false },
+            { name: '🔎 Top Ops', value: topOps.length > 0 ? topOps.join('\n') : 'None', inline: false }
+          )
+          .setTimestamp();
 
       const { ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
 
