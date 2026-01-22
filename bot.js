@@ -288,7 +288,8 @@ client.on('interactionCreate', async (interaction) => {
 
       collector.on('collect', async i => {
         await i.deferUpdate();
-        await interaction.channel.send(`📊 ${interaction.user} is showing off: **${target.username}** has ${stats.total_snipes} snipes, ${stats.times_sniped} times sniped, with a K/D ratio of ${kd}! 🔥`);
+        // Send the same embed publicly
+        await interaction.channel.send({ embeds: [embed] });
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
