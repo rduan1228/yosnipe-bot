@@ -268,17 +268,27 @@ client.on('interactionCreate', async (interaction) => {
         )
         .setTimestamp();
 
-      const reply = await interaction.reply({ embeds: [embed], ephemeral: true });
-      
-      // Add reaction emote
-      await reply.react('📢');
-      
-      // Collect reactions
-      const filter = (reaction, user) => reaction.emoji.name === '📢' && user.id === interaction.user.id;
-      const collector = reply.createReactionCollector({ filter, time: 60000 });
-      
-      collector.on('collect', async () => {
-        await interaction.channel.send({ embeds: [embed] });
+      const { ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
+
+      const showoffButton = new ButtonBuilder()
+        .setCustomId('showoff_stats')
+        .setLabel('📢 Show Off')
+        .setStyle(ButtonStyle.Primary);
+
+      const row = new ActionRowBuilder().addComponents(showoffButton);
+
+      await interaction.reply({ embeds: [embed], ephemeral: true, components: [row] });
+
+      // Create a collector for the button
+      const message = await interaction.fetchReply();
+      const collector = message.createMessageComponentCollector({
+        filter: i => i.customId === 'showoff_stats' && i.user.id === interaction.user.id,
+        time: 60000
+      });
+
+      collector.on('collect', async i => {
+        await i.deferUpdate();
+        await interaction.channel.send(`📊 ${interaction.user} is showing off: **${target.username}** has ${stats.total_snipes} snipes, ${stats.times_sniped} times sniped, with a K/D ratio of ${kd}! 🔥`);
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
