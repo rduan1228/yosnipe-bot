@@ -268,7 +268,18 @@ client.on('interactionCreate', async (interaction) => {
         )
         .setTimestamp();
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      const reply = await interaction.reply({ embeds: [embed], ephemeral: true });
+      
+      // Add reaction emote
+      await reply.react('📢');
+      
+      // Collect reactions
+      const filter = (reaction, user) => reaction.emoji.name === '📢' && user.id === interaction.user.id;
+      const collector = reply.createReactionCollector({ filter, time: 60000 });
+      
+      collector.on('collect', async () => {
+        await interaction.channel.send({ embeds: [embed] });
+      });
     } catch (error) {
       console.error('Error fetching stats:', error);
       await interaction.reply({ 
