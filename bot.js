@@ -17,6 +17,7 @@ const pool = new Pool({
 // Create tables if they don't exist
 async function initDatabase() {
   try {
+    // First, ensure the table exists (without guild_id initially)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS snipes (
         id SERIAL PRIMARY KEY,
@@ -26,12 +27,36 @@ async function initDatabase() {
       )
     `);
     console.log('Database initialized');
+    
+    // MIGRATION STEP 1: Add guild_id column if it doesn't exist
+    try {
+      await pool.query(`ALTER TABLE snipes ADD COLUMN IF NOT EXISTS guild_id TEXT`);
+      console.log('Migration: guild_id column check complete');
+    } catch (err) {
+      console.log('Migration column note:', err.message);
+    }
+    
+    // MIGRATION STEP 2: Assign all NULL guild_id records to your original server
+    try {
+      const ORIGINAL_GUILD_ID = '895923432296951819';
+      const result = await pool.query(
+        `UPDATE snipes SET guild_id = $1 WHERE guild_id IS NULL`,
+        [ORIGINAL_GUILD_ID]
+      );
+      if (result.rowCount > 0) {
+        console.log(`✅ Migration SUCCESS: Assigned ${result.rowCount} old snipes to guild ${ORIGINAL_GUILD_ID}`);
+      } else {
+        console.log('Migration: No NULL guild_id records found (already migrated)');
+      }
+    } catch (err) {
+      console.error('Migration error:', err.message);
+    }
   } catch (err) {
     console.error('Error initializing database:', err);
   }
 }
 
-// Database helper functions
+// Database helper functions (unchanged - still work without guild filtering)
 async function recordSnipe(sniperId, targetId) {
   const result = await pool.query(
     'INSERT INTO snipes (sniper_id, target_id) VALUES ($1, $2) RETURNING id',
@@ -268,7 +293,7 @@ const commands = [
 client.on('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   
-  // Initialize database
+  // Initialize database (includes migration)
   await initDatabase();
   
   // Register slash commands
@@ -277,11 +302,6 @@ client.on('ready', async () => {
   try {
     console.log('Started refreshing application (/) commands.');
     
-    // Register commands to your guild
-    // await rest.put(
-    //   Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-    //   { body: commands },
-    // );
     await rest.put(
       Routes.applicationCommands(client.user.id),
       { body: commands },
@@ -400,103 +420,79 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
     }
-    
-    // /snipehistory command
-    if (commandName === 'snipehistory') {
-      try {
-        await interaction.deferReply({ ephemeral: false });
-        
-        const totalSnipes = await getTotalSnipesCount();
-        if (totalSnipes === 0) {
-          return interaction.editReply({ content: 'No snipes recorded yet!' });
-        }
 
-        const page = 0;
-        const limit = 10;
-        const snipes = await getSnipesHistory(page * limit, limit);
-        
-        const embed = await createHistoryEmbed(snipes, page, limit, totalSnipes, interaction);
-        const components = createHistoryButtons(page, limit, totalSnipes);
-        
-        await interaction.editReply({ embeds: [embed], components });
-      } catch (error) {
-        console.error('Error fetching snipe history:', error);
-        await interaction.editReply({ content: 'Error fetching snipe history. Please try again.' });
-      }
-    }
+      // /snipestats command
+      if (commandName === 'snipestats') {
+        const target = interaction.options.getUser('user') || interaction.user;
 
-    // /snipestats command
-    if (commandName === 'snipestats') {
-      const target = interaction.options.getUser('user') || interaction.user;
+        try {
+          const stats = await getUserStats(target.id);
 
-      try {
-        const stats = await getUserStats(target.id);
-
-        if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
-          return interaction.reply({
-            content: `${target.username} has no snipe activity yet!`,
-            ephemeral: true
-          });
-        }
-
-        const streak = await getSnipeStreak(target.id);
-
-        // Fetch top 3 victims (people this user has sniped the most)
-        const topVictimsResult = await getUserTopVictims(target.id, 3);
-        const topVictims = await Promise.all(topVictimsResult.map(async (entry) => {
-          try {
-            const member = await interaction.guild.members.fetch(entry.target_id);
-            return `**${member.displayName}** (${entry.count})`;
-          } catch {
-            return `**Unknown** (${entry.count})`;
+          if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
+            return interaction.reply({ 
+              content: `${target.username} has no snipe activity yet!`, 
+              ephemeral: true 
+            });
           }
-        }));
 
-        // Fetch top 3 ops (people who sniped this user the most)
-        const topOpsResult = await getOps(target.id, 3);
-        const topOps = await Promise.all(topOpsResult.map(async (entry) => {
-          try {
-            const member = await interaction.guild.members.fetch(entry.sniper_id);
-            return `**${member.displayName}** (${entry.count})`;
-          } catch {
-            return `**Unknown** (${entry.count})`;
-          }
-        }));
+          const streak = await getSnipeStreak(target.id);
 
-        const kd = parseInt(stats.times_sniped) > 0
-          ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
-          : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
+          // Fetch top 3 victims (people this user has sniped the most)
+            const topVictimsResult = await getUserTopVictims(target.id, 3);
+            const topVictims = await Promise.all(topVictimsResult.map(async (entry) => {
+              try {
+                const member = await interaction.guild.members.fetch(entry.target_id);
+                return `**${member.displayName}** (${entry.count})`;
+              } catch {
+                return `**Unknown** (${entry.count})`;
+              }
+            }));
 
-        const embed = new EmbedBuilder()
-          .setColor('#FF6B6B')
-          .setTitle(`📊 Snipe Stats for ${target.username}`)
-          .addFields(
-            { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
-            { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
-            { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
-            { name: '🔥 Current Streak', value: `${streak}`, inline: true },
-            {
-              name: '🔝 Top Victims',
-              value: topVictims.length > 0
-                ? topVictims.slice(0, 3).map((v, i) => {
-                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-                    return `${medal} ${v}`;
-                  }).join(' \n ')
-                : 'None',
-              inline: true
-            },
-            {
-              name: '🔎 Top Ops',
-              value: topOps.length > 0
-                ? topOps.slice(0, 3).map((v, i) => {
-                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-                    return `${medal} ${v}`;
-                  }).join(' \n ')
-                : 'None',
-              inline: true
-            }
-          )
-          .setTimestamp();
+            // Fetch top 3 ops (people who sniped this user the most)
+            const topOpsResult = await getOps(target.id, 3);
+            const topOps = await Promise.all(topOpsResult.map(async (entry) => {
+              try {
+                const member = await interaction.guild.members.fetch(entry.sniper_id);
+                return `**${member.displayName}** (${entry.count})`;
+              } catch {
+                return `**Unknown** (${entry.count})`;
+              }
+            }));
+
+            const kd = parseInt(stats.times_sniped) > 0
+              ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
+              : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
+
+          const embed = new EmbedBuilder()
+            .setColor('#FF6B6B')
+            .setTitle(`📊 Snipe Stats for ${target.username}`)
+            .addFields(
+              { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
+              { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
+              { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
+              { name: '🔥 Current Streak', value: `${streak}`, inline: true },
+              {
+                name: '🔝 Top Victims',
+                value: topVictims.length > 0
+                  ? topVictims.slice(0, 3).map((v, i) => {
+                      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                      return `${medal} ${v}`;
+                    }).join(' \n ')
+                  : 'None',
+                inline: true
+              },
+              {
+                name: '🔎 Top Ops',
+                value: topOps.length > 0
+                  ? topOps.slice(0, 3).map((v, i) => {
+                      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                      return `${medal} ${v}`;
+                    }).join(' \n ')
+                  : 'None',
+                inline: true
+              }
+            )
+            .setTimestamp();
 
         const showoffButton = new ButtonBuilder()
           .setCustomId('showoff_stats')
@@ -520,9 +516,9 @@ client.on('interactionCreate', async (interaction) => {
         });
       } catch (error) {
         console.error('Error fetching stats:', error);
-        await interaction.reply({
-          content: 'Error fetching stats. Please try again.',
-          ephemeral: true
+        await interaction.reply({ 
+          content: 'Error fetching stats. Please try again.', 
+          ephemeral: true 
         });
       }
     }
@@ -596,7 +592,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // /leaderboard command
+    // /ops command
     if (commandName === 'ops') {
       const target = interaction.options.getUser('user') || interaction.user;
 
@@ -641,12 +637,37 @@ client.on('interactionCreate', async (interaction) => {
           { name: '/unsnipe', value: 'Remove your last logged snipe (in case of typo)' },
           { name: '/snipestats [@user]', value: 'View snipe statistics for yourself or another user' },
           { name: '/leaderboard [type]', value: 'View top snipers or most sniped victims (public)' },
+          { name: '/ops [@user]', value: 'View who sniped you the most' },
           { name: '/snipehistory', value: 'View snipe history with pagination' },
           { name: '/help', value: 'Show this help message' }
         )
         .setFooter({ text: 'Data is permanently stored in PostgreSQL database!' });
 
       await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // /snipehistory command
+    if (commandName === 'snipehistory') {
+      try {
+        await interaction.deferReply({ ephemeral: false });
+        
+        const totalSnipes = await getTotalSnipesCount();
+        if (totalSnipes === 0) {
+          return interaction.editReply({ content: 'No snipes recorded yet!' });
+        }
+
+        const page = 0;
+        const limit = 10;
+        const snipes = await getSnipesHistory(page * limit, limit);
+        
+        const embed = await createHistoryEmbed(snipes, page, limit, totalSnipes, interaction);
+        const components = createHistoryButtons(page, limit, totalSnipes);
+        
+        await interaction.editReply({ embeds: [embed], components });
+      } catch (error) {
+        console.error('Error fetching snipe history:', error);
+        await interaction.editReply({ content: 'Error fetching snipe history. Please try again.' });
+      }
     }
   }
 
