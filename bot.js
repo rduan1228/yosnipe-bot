@@ -84,6 +84,20 @@ async function getTopVictims(limit = 10) {
   return result.rows;
 }
 
+// Get top victims for a specific sniper (people this user has sniped the most)
+async function getUserTopVictims(sniperId, limit = 3) {
+  const result = await pool.query(
+    `SELECT target_id, COUNT(*) as count 
+     FROM snipes 
+     WHERE sniper_id = $1
+     GROUP BY target_id 
+     ORDER BY count DESC 
+     LIMIT $2`,
+    [sniperId, limit]
+  );
+  return result.rows;
+}
+
 async function getSnipesHistory(offset = 0, limit = 10) {
   const result = await pool.query(
     `SELECT sniper_id, target_id, timestamp 
@@ -405,36 +419,30 @@ client.on('interactionCreate', async (interaction) => {
           const streak = await getSnipeStreak(target.id);
 
           // Fetch top 3 victims (people this user has sniped the most)
-          const topVictimsResult = await pool.query(
-            `SELECT target_id, COUNT(*) as count FROM snipes WHERE sniper_id = $1 GROUP BY target_id ORDER BY count DESC LIMIT 3`,
-            [target.id]
-          );
-          const topVictims = await Promise.all(topVictimsResult.rows.map(async (entry) => {
-            try {
-              const member = await interaction.guild.members.fetch(entry.target_id);
-              return `**${member.displayName}** (${entry.count})`;
-            } catch {
-              return `**Unknown** (${entry.count})`;
-            }
-          }));
+            const topVictimsResult = await getUserTopVictims(target.id, 3);
+            const topVictims = await Promise.all(topVictimsResult.map(async (entry) => {
+              try {
+                const member = await interaction.guild.members.fetch(entry.target_id);
+                return `**${member.displayName}** (${entry.count})`;
+              } catch {
+                return `**Unknown** (${entry.count})`;
+              }
+            }));
 
-          // Fetch top 3 ops (people who sniped this user the most)
-          const topOpsResult = await pool.query(
-            `SELECT sniper_id, COUNT(*) as count FROM snipes WHERE target_id = $1 GROUP BY sniper_id ORDER BY count DESC LIMIT 3`,
-            [target.id]
-          );
-          const topOps = await Promise.all(topOpsResult.rows.map(async (entry) => {
-            try {
-              const member = await interaction.guild.members.fetch(entry.sniper_id);
-              return `**${member.displayName}** (${entry.count})`;
-            } catch {
-              return `**Unknown** (${entry.count})`;
-            }
-          }));
+            // Fetch top 3 ops (people who sniped this user the most)
+            const topOpsResult = await getOps(target.id, 3);
+            const topOps = await Promise.all(topOpsResult.map(async (entry) => {
+              try {
+                const member = await interaction.guild.members.fetch(entry.sniper_id);
+                return `**${member.displayName}** (${entry.count})`;
+              } catch {
+                return `**Unknown** (${entry.count})`;
+              }
+            }));
 
-          const kd = parseInt(stats.times_sniped) > 0
-            ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
-            : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
+            const kd = parseInt(stats.times_sniped) > 0
+              ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
+              : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
 
           const embed = new EmbedBuilder()
             .setColor('#FF6B6B')
@@ -466,8 +474,6 @@ client.on('interactionCreate', async (interaction) => {
               }
             )
             .setTimestamp();
-
-        const { ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
 
         const showoffButton = new ButtonBuilder()
           .setCustomId('showoff_stats')
