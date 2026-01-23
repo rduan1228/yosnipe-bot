@@ -182,7 +182,7 @@ async function createHistoryEmbed(snipes, page, limit, totalSnipes, interaction)
   const embed = new EmbedBuilder()
     .setColor('#9C27B0')
     .setTitle('📜 Snipe History')
-    .setDescription(historyLines.join('\n'))
+    .setDescription(historyLines.length > 0 ? historyLines.join('\n') : 'No snipes recorded yet!')
     .setFooter({ text: `Page ${page + 1} • Showing ${startNum}-${endNum} of ${totalSnipes} snipes` })
     .setTimestamp();
     
@@ -353,6 +353,14 @@ client.on('interactionCreate', async (interaction) => {
 
     // /snipe command
     if (commandName === 'snipe') {
+      // Ensure command is used in a server
+      if (!interaction.guildId) {
+        return interaction.reply({
+          content: 'This command can only be used in a server!',
+          ephemeral: true
+        });
+      }
+
       const target = interaction.options.getUser('target');
       
       if (target.id === interaction.user.id) {
@@ -370,6 +378,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       try {
+        console.log(`DEBUG: Guild ID = ${interaction.guildId}, Sniper = ${interaction.user.id}, Target = ${target.id}`);
         await recordSnipe(interaction.guildId, interaction.user.id, target.id);
         const stats = await getUserStats(interaction.guildId, interaction.user.id);
         const streak = await getSnipeStreak(interaction.guildId, interaction.user.id);
