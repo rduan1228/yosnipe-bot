@@ -147,14 +147,14 @@ async function createHistoryEmbed(snipes, page, limit, totalSnipes, interaction)
   const historyLines = await Promise.all(
     snipes.map(async (snipe, index) => {
       try {
-        const sniperMember = await interaction.guild.members.fetch(snipe.sniper_id);
-        const targetMember = await interaction.guild.members.fetch(snipe.target_id);
+        const sniperMember = await interaction.guild.members.fetch(snipe.sniper_id).catch(() => null);
+        const targetMember = await interaction.guild.members.fetch(snipe.target_id).catch(() => null);
         
-        const sniperName = sniperMember.displayName;
-        const targetName = targetMember.displayName;
+        const sniperName = sniperMember ? sniperMember.displayName : 'Unknown User';
+        const targetName = targetMember ? targetMember.displayName : 'Unknown User';
         
         const snipeNumber = startNum + index;
-        const time = snipe.timestamp.toLocaleString();
+        const time = new Date(snipe.timestamp).toLocaleString();
         
         // Calculate streak (simple version: consecutive snipes by same sniper)
         let streakText = '';
@@ -172,7 +172,9 @@ async function createHistoryEmbed(snipes, page, limit, totalSnipes, interaction)
         
         return `${snipeNumber}. ${time}: **${sniperName}** has sniped **${targetName}**${streakText}`;
       } catch (err) {
-        return `${startNum + index}. ${snipe.timestamp.toLocaleString()}: Unknown User has sniped Unknown User`;
+        const snipeNumber = startNum + index;
+        const time = new Date(snipe.timestamp).toLocaleString();
+        return `${snipeNumber}. ${time}: Unknown User has sniped Unknown User`;
       }
     })
   );
