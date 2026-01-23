@@ -17,10 +17,10 @@ const pool = new Pool({
 // Create tables if they don't exist
 async function initDatabase() {
   try {
-    // First, ensure the table exists (without guild_id initially)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS snipes (
         id SERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
         sniper_id TEXT NOT NULL,
         target_id TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
