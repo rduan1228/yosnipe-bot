@@ -209,33 +209,33 @@ function createHistoryButtons(page, limit, totalSnipes) {
   return [row];
 }
 
-async function getOps(userid, limit = 3) {
+async function getOps(guildId, userid, limit = 3) {
   const result = await pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
-     WHERE target_id = $1
+     WHERE guild_id = $1 AND target_id = $2
      GROUP BY sniper_id 
      ORDER BY count DESC 
-     LIMIT $2`,
-    [userid, limit]
+     LIMIT $3`,
+    [guildId, userid, limit]
   );
   return result.rows;
 }
 
-async function getSnipeStreak(userId) {
+async function getSnipeStreak(guildId, userId) {
   const result = await pool.query(
     `
     WITH last_death AS (
       SELECT MAX(id) AS last_death_id
       FROM snipes
-      WHERE target_id = $1
+      WHERE guild_id = $1 AND target_id = $2
     )
     SELECT COUNT(*) AS streak
     FROM snipes
-    WHERE sniper_id = $1
+    WHERE guild_id = $1 AND sniper_id = $2
       AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
     `,
-    [userId]
+    [guildId, userId]
   );
 
   return Number(result.rows[0].streak);
@@ -331,9 +331,9 @@ client.on('interactionCreate', async (interaction) => {
       try {
         await interaction.deferUpdate();
         
-        const totalSnipes = await getTotalSnipesCount();
+        const totalSnipes = await getTotalSnipesCount(interaction.guildId);
         const limit = 10;
-        const snipes = await getSnipesHistory(newPage * limit, limit);
+        const snipes = await getSnipesHistory(interaction.guildId, newPage * limit, limit);
         
         const embed = await createHistoryEmbed(snipes, newPage, limit, totalSnipes, interaction);
         const components = createHistoryButtons(newPage, limit, totalSnipes);
@@ -368,9 +368,9 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       try {
-        await recordSnipe(interaction.user.id, target.id);
-        const stats = await getUserStats(interaction.user.id);
-        const streak = await getSnipeStreak(interaction.user.id);
+        await recordSnipe(interaction.guildId, interaction.user.id, target.id);
+        const stats = await getUserStats(interaction.guildId, interaction.user.id);
+        const streak = await getSnipeStreak(interaction.guildId, interaction.user.id);
         
         // Send ephemeral confirmation to the sniper
         await interaction.reply({ 
@@ -398,7 +398,7 @@ client.on('interactionCreate', async (interaction) => {
     // /unsnipe command
     if (commandName === 'unsnipe') {
       try {
-        const removed = await removeLastSnipe(interaction.user.id);
+        const removed = await removeLastSnipe(interaction.guildId, interaction.user.id);
         
         if (!removed) {
           return interaction.reply({ 
@@ -532,7 +532,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: false });
 
         if (type === 'snipers') {
-          const leaderboard = await getTopSnipers(10);
+          const leaderboard = await getTopSnipers(interaction.guildId, 10);
 
           // Fetch all users and get their server nicknames
           const leaderboardWithUsers = await Promise.all(
@@ -558,7 +558,7 @@ client.on('interactionCreate', async (interaction) => {
 
           await interaction.editReply({ embeds: [embed] });
         } else if (type === 'victims') {
-          const leaderboard = await getTopVictims(10);
+          const leaderboard = await getTopVictims(interaction.guildId, 10);
 
           // Fetch all users and get their server nicknames
           const leaderboardWithUsers = await Promise.all(
@@ -651,14 +651,14 @@ client.on('interactionCreate', async (interaction) => {
       try {
         await interaction.deferReply({ ephemeral: false });
         
-        const totalSnipes = await getTotalSnipesCount();
+        const totalSnipes = await getTotalSnipesCount(interaction.guildId);
         if (totalSnipes === 0) {
           return interaction.editReply({ content: 'No snipes recorded yet!' });
         }
 
         const page = 0;
         const limit = 10;
-        const snipes = await getSnipesHistory(page * limit, limit);
+        const snipes = await getSnipesHistory(interaction.guildId, page * limit, limit);
         
         const embed = await createHistoryEmbed(snipes, page, limit, totalSnipes, interaction);
         const components = createHistoryButtons(page, limit, totalSnipes);
