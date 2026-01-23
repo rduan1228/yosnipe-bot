@@ -27,115 +27,128 @@ async function initDatabase() {
       )
     `);
     console.log('Database initialized');
-    
-    // MIGRATION STEP 1: Add guild_id column if it doesn't exist
-    try {
-      await pool.query(`ALTER TABLE snipes ADD COLUMN IF NOT EXISTS guild_id TEXT`);
-      console.log('Migration: guild_id column check complete');
-    } catch (err) {
-      console.log('Migration column note:', err.message);
-    }
-    
-    // MIGRATION STEP 2: Assign all NULL guild_id records to your original server
-    try {
-      const ORIGINAL_GUILD_ID = '895923432296951819';
-      const result = await pool.query(
-        `UPDATE snipes SET guild_id = $1 WHERE guild_id IS NULL`,
-        [ORIGINAL_GUILD_ID]
-      );
-      if (result.rowCount > 0) {
-        console.log(`✅ Migration SUCCESS: Assigned ${result.rowCount} old snipes to guild ${ORIGINAL_GUILD_ID}`);
-      } else {
-        console.log('Migration: No NULL guild_id records found (already migrated)');
-      }
-    } catch (err) {
-      console.error('Migration error:', err.message);
-    }
   } catch (err) {
     console.error('Error initializing database:', err);
   }
 }
 
-// Database helper functions (unchanged - still work without guild filtering)
-async function recordSnipe(sniperId, targetId) {
+// Database helper functions - ALL WITH GUILD_ID
+async function recordSnipe(guildId, sniperId, targetId) {
   const result = await pool.query(
-    'INSERT INTO snipes (sniper_id, target_id) VALUES ($1, $2) RETURNING id',
-    [sniperId, targetId]
+    'INSERT INTO snipes (guild_id, sniper_id, target_id) VALUES ($1, $2, $3) RETURNING id',
+    [guildId, sniperId, targetId]
   );
   return result.rows[0].id;
 }
 
-async function removeLastSnipe(sniperId) {
+async function removeLastSnipe(guildId, sniperId) {
   const result = await pool.query(
-    'DELETE FROM snipes WHERE id = (SELECT id FROM snipes WHERE sniper_id = $1 ORDER BY timestamp DESC LIMIT 1) RETURNING target_id',
-    [sniperId]
+    'DELETE FROM snipes WHERE id = (SELECT id FROM snipes WHERE guild_id = $1 AND sniper_id = $2 ORDER BY timestamp DESC LIMIT 1) RETURNING target_id',
+    [guildId, sniperId]
   );
   return result.rows[0];
 }
 
-async function getUserStats(userId) {
+async function getUserStats(guildId, userId) {
   const result = await pool.query(
     `SELECT 
-      (SELECT COUNT(*) FROM snipes WHERE sniper_id = $1) as total_snipes,
-      (SELECT COUNT(*) FROM snipes WHERE target_id = $1) as times_sniped
+      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND sniper_id = $2) as total_snipes,
+      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND target_id = $2) as times_sniped
     `,
-    [userId]
+    [guildId, userId]
   );
   return result.rows[0];
 }
 
-async function getTopSnipers(limit = 10) {
+async function getTopSnipers(guildId, limit = 10) {
   const result = await pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
+     WHERE guild_id = $1
      GROUP BY sniper_id 
      ORDER BY count DESC 
-     LIMIT $1`,
-    [limit]
+     LIMIT $2`,
+    [guildId, limit]
   );
   return result.rows;
 }
 
-async function getTopVictims(limit = 10) {
+async function getTopVictims(guildId, limit = 10) {
   const result = await pool.query(
     `SELECT target_id, COUNT(*) as count 
      FROM snipes 
-     GROUP BY target_id 
-     ORDER BY count DESC 
-     LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
-}
-
-// Get top victims for a specific sniper (people this user has sniped the most)
-async function getUserTopVictims(sniperId, limit = 3) {
-  const result = await pool.query(
-    `SELECT target_id, COUNT(*) as count 
-     FROM snipes 
-     WHERE sniper_id = $1
+     WHERE guild_id = $1
      GROUP BY target_id 
      ORDER BY count DESC 
      LIMIT $2`,
-    [sniperId, limit]
+    [guildId, limit]
   );
   return result.rows;
 }
 
-async function getSnipesHistory(offset = 0, limit = 10) {
+async function getUserTopVictims(guildId, sniperId, limit = 3) {
+  const result = await pool.query(
+    `SELECT target_id, COUNT(*) as count 
+     FROM snipes 
+     WHERE guild_id = $1 AND sniper_id = $2
+     GROUP BY target_id 
+     ORDER BY count DESC 
+     LIMIT $3`,
+    [guildId, sniperId, limit]
+  );
+  return result.rows;
+}
+
+async function getSnipesHistory(guildId, offset = 0, limit = 10) {
   const result = await pool.query(
     `SELECT sniper_id, target_id, timestamp 
      FROM snipes 
+     WHERE guild_id = $1
      ORDER BY timestamp DESC 
-     LIMIT $1 OFFSET $2`,
-    [limit, offset]
+     LIMIT $2 OFFSET $3`,
+    [guildId, limit, offset]
   );
   return result.rows;
 }
 
-async function getTotalSnipesCount() {
-  const result = await pool.query('SELECT COUNT(*) as count FROM snipes');
+async function getTotalSnipesCount(guildId) {
+  const result = await pool.query(
+    'SELECT COUNT(*) as count FROM snipes WHERE guild_id = $1',
+    [guildId]
+  );
   return parseInt(result.rows[0].count);
+}
+
+async function getOps(guildId, userid, limit = 3) {
+  const result = await pool.query(
+    `SELECT sniper_id, COUNT(*) as count 
+     FROM snipes 
+     WHERE guild_id = $1 AND target_id = $2
+     GROUP BY sniper_id 
+     ORDER BY count DESC 
+     LIMIT $3`,
+    [guildId, userid, limit]
+  );
+  return result.rows;
+}
+
+async function getSnipeStreak(guildId, userId) {
+  const result = await pool.query(
+    `
+    WITH last_death AS (
+      SELECT MAX(id) AS last_death_id
+      FROM snipes
+      WHERE guild_id = $1 AND target_id = $2
+    )
+    SELECT COUNT(*) AS streak
+    FROM snipes
+    WHERE guild_id = $1 AND sniper_id = $2
+      AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
+    `,
+    [guildId, userId]
+  );
+
+  return Number(result.rows[0].streak);
 }
 
 // Helper functions for snipe history
@@ -143,7 +156,6 @@ async function createHistoryEmbed(snipes, page, limit, totalSnipes, interaction)
   const startNum = page * limit + 1;
   const endNum = Math.min((page + 1) * limit, totalSnipes);
   
-  // Fetch user display names
   const historyLines = await Promise.all(
     snipes.map(async (snipe, index) => {
       try {
@@ -156,7 +168,6 @@ async function createHistoryEmbed(snipes, page, limit, totalSnipes, interaction)
         const snipeNumber = startNum + index;
         const time = new Date(snipe.timestamp).toLocaleString();
         
-        // Calculate streak (simple version: consecutive snipes by same sniper)
         let streakText = '';
         if (index > 0 && snipes[index - 1].sniper_id === snipe.sniper_id) {
           let streakCount = 2;
@@ -211,38 +222,6 @@ function createHistoryButtons(page, limit, totalSnipes) {
   return [row];
 }
 
-async function getOps(guildId, userid, limit = 3) {
-  const result = await pool.query(
-    `SELECT sniper_id, COUNT(*) as count 
-     FROM snipes 
-     WHERE guild_id = $1 AND target_id = $2
-     GROUP BY sniper_id 
-     ORDER BY count DESC 
-     LIMIT $3`,
-    [guildId, userid, limit]
-  );
-  return result.rows;
-}
-
-async function getSnipeStreak(guildId, userId) {
-  const result = await pool.query(
-    `
-    WITH last_death AS (
-      SELECT MAX(id) AS last_death_id
-      FROM snipes
-      WHERE guild_id = $1 AND target_id = $2
-    )
-    SELECT COUNT(*) AS streak
-    FROM snipes
-    WHERE guild_id = $1 AND sniper_id = $2
-      AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
-    `,
-    [guildId, userId]
-  );
-
-  return Number(result.rows[0].streak);
-}
-
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
@@ -276,6 +255,7 @@ const commands = [
           { name: 'Top Snipers', value: 'snipers' },
           { name: 'Most Sniped Victims', value: 'victims' }
         )),
+  
   new SlashCommandBuilder()
     .setName('ops')
     .setDescription('Get who sniped you the most')
@@ -283,6 +263,7 @@ const commands = [
       option.setName('user')
         .setDescription('User to check stats for (defaults to you)')
         .setRequired(false)),
+  
   new SlashCommandBuilder()
     .setName('snipehistory')
     .setDescription('View global snipe history (10 per page)'),
@@ -295,10 +276,8 @@ const commands = [
 client.on('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   
-  // Initialize database (includes migration)
   await initDatabase();
   
-  // Register slash commands
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   
   try {
@@ -316,7 +295,6 @@ client.on('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  // Handle button interactions
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     if (parts[0] === 'snipehistory') {
@@ -351,9 +329,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isChatInputCommand()) {
     const { commandName } = interaction;
 
-    // /snipe command
     if (commandName === 'snipe') {
-      // Ensure command is used in a server
       if (!interaction.guildId) {
         return interaction.reply({
           content: 'This command can only be used in a server!',
@@ -378,20 +354,17 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       try {
-        console.log(`DEBUG: Guild ID = ${interaction.guildId}, Sniper = ${interaction.user.id}, Target = ${target.id}`);
         await recordSnipe(interaction.guildId, interaction.user.id, target.id);
         const stats = await getUserStats(interaction.guildId, interaction.user.id);
         const streak = await getSnipeStreak(interaction.guildId, interaction.user.id);
         
-        // Send ephemeral confirmation to the sniper
         await interaction.reply({ 
           content: `🎯 Snipe recorded! Total snipes: ${stats.total_snipes}`, 
           ephemeral: true 
         });
 
-        // Send public message to the channel
         await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
-        // Public hype message
+        
         if (streak >= 2) {
           await interaction.channel.send(
             `🔥 ${interaction.user} is on a **${streak}-snipe streak!**`
@@ -406,7 +379,6 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // /unsnipe command
     if (commandName === 'unsnipe') {
       try {
         const removed = await removeLastSnipe(interaction.guildId, interaction.user.id);
@@ -432,78 +404,74 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-      // /snipestats command
-      if (commandName === 'snipestats') {
-        const target = interaction.options.getUser('user') || interaction.user;
+    if (commandName === 'snipestats') {
+      const target = interaction.options.getUser('user') || interaction.user;
 
-        try {
-          const stats = await getUserStats(target.id);
+      try {
+        const stats = await getUserStats(interaction.guildId, target.id);
 
-          if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
-            return interaction.reply({ 
-              content: `${target.username} has no snipe activity yet!`, 
-              ephemeral: true 
-            });
+        if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
+          return interaction.reply({
+            content: `${target.username} has no snipe activity yet!`,
+            ephemeral: true
+          });
+        }
+
+        const streak = await getSnipeStreak(interaction.guildId, target.id);
+        const topVictimsResult = await getUserTopVictims(interaction.guildId, target.id, 3);
+        const topVictims = await Promise.all(topVictimsResult.map(async (entry) => {
+          try {
+            const member = await interaction.guild.members.fetch(entry.target_id);
+            return `**${member.displayName}** (${entry.count})`;
+          } catch {
+            return `**Unknown** (${entry.count})`;
           }
+        }));
 
-          const streak = await getSnipeStreak(target.id);
+        const topOpsResult = await getOps(interaction.guildId, target.id, 3);
+        const topOps = await Promise.all(topOpsResult.map(async (entry) => {
+          try {
+            const member = await interaction.guild.members.fetch(entry.sniper_id);
+            return `**${member.displayName}** (${entry.count})`;
+          } catch {
+            return `**Unknown** (${entry.count})`;
+          }
+        }));
 
-          // Fetch top 3 victims (people this user has sniped the most)
-            const topVictimsResult = await getUserTopVictims(target.id, 3);
-            const topVictims = await Promise.all(topVictimsResult.map(async (entry) => {
-              try {
-                const member = await interaction.guild.members.fetch(entry.target_id);
-                return `**${member.displayName}** (${entry.count})`;
-              } catch {
-                return `**Unknown** (${entry.count})`;
-              }
-            }));
+        const kd = parseInt(stats.times_sniped) > 0
+          ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
+          : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
 
-            // Fetch top 3 ops (people who sniped this user the most)
-            const topOpsResult = await getOps(target.id, 3);
-            const topOps = await Promise.all(topOpsResult.map(async (entry) => {
-              try {
-                const member = await interaction.guild.members.fetch(entry.sniper_id);
-                return `**${member.displayName}** (${entry.count})`;
-              } catch {
-                return `**Unknown** (${entry.count})`;
-              }
-            }));
-
-            const kd = parseInt(stats.times_sniped) > 0
-              ? (parseInt(stats.total_snipes) / parseInt(stats.times_sniped)).toFixed(2)
-              : (parseInt(stats.total_snipes) > 0 ? '∞' : '0');
-
-          const embed = new EmbedBuilder()
-            .setColor('#FF6B6B')
-            .setTitle(`📊 Snipe Stats for ${target.username}`)
-            .addFields(
-              { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
-              { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
-              { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
-              { name: '🔥 Current Streak', value: `${streak}`, inline: true },
-              {
-                name: '🔝 Top Victims',
-                value: topVictims.length > 0
-                  ? topVictims.slice(0, 3).map((v, i) => {
-                      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-                      return `${medal} ${v}`;
-                    }).join(' \n ')
-                  : 'None',
-                inline: true
-              },
-              {
-                name: '🔎 Top Ops',
-                value: topOps.length > 0
-                  ? topOps.slice(0, 3).map((v, i) => {
-                      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
-                      return `${medal} ${v}`;
-                    }).join(' \n ')
-                  : 'None',
-                inline: true
-              }
-            )
-            .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setColor('#FF6B6B')
+          .setTitle(`📊 Snipe Stats for ${target.username}`)
+          .addFields(
+            { name: '🎯 Total Snipes', value: `${stats.total_snipes}`, inline: true },
+            { name: '💀 Times Sniped', value: `${stats.times_sniped}`, inline: true },
+            { name: '📈 K/D Ratio', value: `${kd}`, inline: true },
+            { name: '🔥 Current Streak', value: `${streak}`, inline: true },
+            {
+              name: '🔝 Top Victims',
+              value: topVictims.length > 0
+                ? topVictims.slice(0, 3).map((v, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                    return `${medal} ${v}`;
+                  }).join('\n')
+                : 'None',
+              inline: true
+            },
+            {
+              name: '🔎 Top Ops',
+              value: topOps.length > 0
+                ? topOps.slice(0, 3).map((v, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+                    return `${medal} ${v}`;
+                  }).join('\n')
+                : 'None',
+              inline: true
+            }
+          )
+          .setTimestamp();
 
         const showoffButton = new ButtonBuilder()
           .setCustomId('showoff_stats')
@@ -514,7 +482,6 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({ embeds: [embed], ephemeral: true, components: [row] });
 
-        // Create a collector for the button
         const message = await interaction.fetchReply();
         const collector = message.createMessageComponentCollector({
           filter: i => i.customId === 'showoff_stats' && i.user.id === interaction.user.id,
@@ -527,30 +494,27 @@ client.on('interactionCreate', async (interaction) => {
         });
       } catch (error) {
         console.error('Error fetching stats:', error);
-        await interaction.reply({ 
-          content: 'Error fetching stats. Please try again.', 
-          ephemeral: true 
+        await interaction.reply({
+          content: 'Error fetching stats. Please try again.',
+          ephemeral: true
         });
       }
     }
 
-    // /leaderboard command
     if (commandName === 'leaderboard') {
       const type = interaction.options.getString('type') || 'snipers';
 
       try {
-        // Defer reply since we need to fetch users
         await interaction.deferReply({ ephemeral: false });
 
         if (type === 'snipers') {
           const leaderboard = await getTopSnipers(interaction.guildId, 10);
 
-          // Fetch all users and get their server nicknames
           const leaderboardWithUsers = await Promise.all(
             leaderboard.map(async (entry, i) => {
               try {
                 const member = await interaction.guild.members.fetch(entry.sniper_id);
-                const displayName = member.displayName; // This gets server nickname or username
+                const displayName = member.displayName;
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
                 return `${medal} **${displayName}** - ${entry.count} snipes`;
               } catch (err) {
@@ -571,12 +535,11 @@ client.on('interactionCreate', async (interaction) => {
         } else if (type === 'victims') {
           const leaderboard = await getTopVictims(interaction.guildId, 10);
 
-          // Fetch all users and get their server nicknames
           const leaderboardWithUsers = await Promise.all(
             leaderboard.map(async (entry, i) => {
               try {
                 const member = await interaction.guild.members.fetch(entry.target_id);
-                const displayName = member.displayName; // This gets server nickname or username
+                const displayName = member.displayName;
                 const medal = i === 0 ? '💀' : i === 1 ? '☠️' : i === 2 ? '👻' : `${i + 1}.`;
                 return `${medal} **${displayName}** - ${entry.count} times sniped`;
               } catch (err) {
@@ -603,12 +566,12 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // /ops command
     if (commandName === 'ops') {
       const target = interaction.options.getUser('user') || interaction.user;
 
-      const opponents = await getOps(target.id, 3);
       try {
+        const opponents = await getOps(interaction.guildId, target.id, 3);
+        
         if (!opponents || opponents.length === 0) { 
           return interaction.reply({ 
             content: `${target.username} has not been sniped!`, 
@@ -637,7 +600,6 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // /help command
     if (commandName === 'help') {
       const embed = new EmbedBuilder()
         .setColor('#2196F3')
@@ -657,7 +619,6 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // /snipehistory command
     if (commandName === 'snipehistory') {
       try {
         await interaction.deferReply({ ephemeral: false });
@@ -681,13 +642,8 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
   }
-
-  else {
-    return;
-  }
 });
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM signal received: closing database connection');
   await pool.end();
