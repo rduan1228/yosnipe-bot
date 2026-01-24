@@ -425,7 +425,7 @@ client.on('interactionCreate', async (interaction) => {
           } catch (err) {
             console.error('Error resolving snipe vote:', err);
           }
-        }, 10000);
+        }, 1000 * 24 * 60 * 60); // 24 hours in milliseconds
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
