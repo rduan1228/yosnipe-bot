@@ -222,6 +222,29 @@ function createHistoryButtons(page, limit, totalSnipes) {
   return [row];
 }
 
+// Create the Show Off button as a reusable helper (returns components array)
+function createShowoffButton() {
+  const showoffButton = new ButtonBuilder()
+    .setCustomId('showoff_stats')
+    .setLabel('📢 Show Off')
+    .setStyle(ButtonStyle.Primary);
+
+  const row = new ActionRowBuilder().addComponents(showoffButton);
+  return [row];
+}
+
+// Remove the last snipe matching guildId, sniperId and targetId
+async function removeLastSnipeAgainst(guildId, sniperId, targetId) {
+  const result = await pool.query(
+    `DELETE FROM snipes WHERE id = (
+       SELECT id FROM snipes WHERE guild_id = $1 AND sniper_id = $2 AND target_id = $3
+       ORDER BY timestamp DESC LIMIT 1
+     ) RETURNING id, sniper_id, target_id`,
+    [guildId, sniperId, targetId]
+  );
+  return result.rows[0];
+}
+
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
@@ -363,13 +386,46 @@ client.on('interactionCreate', async (interaction) => {
           ephemeral: true 
         });
 
-        await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
-        
+        // Post public snipe message and enable reaction voting
+        const posted = await interaction.channel.send({ content: `🎯 ${interaction.user} just sniped ${target}! 💥` });
+
         if (streak >= 2) {
           await interaction.channel.send(
             `🔥 ${interaction.user} is on a **${streak}-snipe streak!**`
           );
         }
+        
+        // Add up/down reactions for voting
+        try {
+          await posted.react('⬆️');
+          await posted.react('⬇️');
+        } catch (reactErr) {
+          console.error('Failed to add reactions to snipe message:', reactErr);
+        }
+
+        // Schedule vote resolution after 24 hours. On tie, remove last snipe between these users.
+        setTimeout(async () => {
+          try {
+            const fetched = await posted.fetch();
+            const upReact = fetched.reactions.cache.get('⬆️');
+            const downReact = fetched.reactions.cache.get('⬇️');
+            const upCount = (upReact?.count || 0) - 1; // subtract bot's own reaction
+            const downCount = (downReact?.count || 0) - 1;
+
+            if (upCount === downCount) {
+              const removed = await removeLastSnipeAgainst(interaction.guildId, interaction.user.id, target.id);
+              if (removed) {
+                await interaction.channel.send(`🔄 Tie vote: removed last snipe by ${interaction.user} against ${target}.`);
+              } else {
+                await interaction.channel.send('🔄 Tie vote: no matching snipe found to remove.');
+              }
+            } else {
+              await interaction.channel.send(`✅ Vote concluded: snipe stands (${upCount} up / ${downCount} down).`);
+            }
+          } catch (err) {
+            console.error('Error resolving snipe vote:', err);
+          }
+        }, 24 * 60 * 60 * 1000);
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
@@ -473,14 +529,9 @@ client.on('interactionCreate', async (interaction) => {
           )
           .setTimestamp();
 
-        const showoffButton = new ButtonBuilder()
-          .setCustomId('showoff_stats')
-          .setLabel('📢 Show Off')
-          .setStyle(ButtonStyle.Primary);
+        const components = createShowoffButton();
 
-        const row = new ActionRowBuilder().addComponents(showoffButton);
-
-        await interaction.reply({ embeds: [embed], ephemeral: true, components: [row] });
+        await interaction.reply({ embeds: [embed], ephemeral: true, components });
 
         const message = await interaction.fetchReply();
         const collector = message.createMessageComponentCollector({
