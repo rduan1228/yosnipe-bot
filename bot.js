@@ -386,46 +386,102 @@ client.on('interactionCreate', async (interaction) => {
           ephemeral: true 
         });
 
-        // Post public snipe message and enable reaction voting
-        const posted = await interaction.channel.send({ content: `🎯 ${interaction.user} just sniped ${target}! 💥` });
-
+        // Post public snipe message and enable voting via a button (don't add reactions immediately)
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+        const startVoteRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`start_vote_${Date.now()}`) // unique id
+            .setLabel('Start Voting')
+            .setStyle(ButtonStyle.Primary)
+        );
+        const posted = await interaction.channel.send({ content: `🎯 ${interaction.user} just sniped ${target}! 💥`, components: [startVoteRow] });
+ 
         if (streak >= 2) {
           await interaction.channel.send(
             `🔥 ${interaction.user} is on a **${streak}-snipe streak!**`
           );
         }
         
-        // Add up/down reactions for voting
+        // Create a collector for the "Start Voting" button. When pressed, the bot will add the up/down reactions and disable the button.
         try {
-          await posted.react('⬆️');
-          await posted.react('⬇️');
-        } catch (reactErr) {
-          console.error('Failed to add reactions to snipe message:', reactErr);
+          const voteCollector = posted.createMessageComponentCollector({ time: 24 * 60 * 60 * 1000 });
+ 
+          voteCollector.on('collect', async (btn) => {
+            if (!btn.customId.startsWith('start_vote_')) return;
+            try {
+              await btn.deferReply({ ephemeral: true });
+              const fetched = await posted.fetch();
+              if (!fetched.reactions.cache.has('⬆️')) await posted.react('⬆️');
+              if (!fetched.reactions.cache.has('⬇️')) await posted.react('⬇️');
+ 
+              // disable the button so voting can only be started once
+              const disabledRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(btn.customId)
+                  .setLabel('Voting Started')
+                  .setStyle(ButtonStyle.Secondary)
+                  .setDisabled(true)
+              );
+              await posted.edit({ components: [disabledRow] });
+              await btn.followUp({ content: 'Voting started — reactions added.', ephemeral: true });
+            } catch (err) {
+              console.error('Error starting vote:', err);
+              try { await btn.followUp({ content: 'Failed to start vote.', ephemeral: true }); } catch {}
+            }
+          });
+        } catch (err) {
+          console.error('Failed to create vote button collector:', err);
         }
 
-        // Schedule vote resolution after 24 hours. On tie, remove last snipe between these users.
+         // Schedule vote resolution after 5 hours. Remove only if more downvotes; ignore ties.
         setTimeout(async () => {
-          try {
-            const fetched = await posted.fetch();
-            const upReact = fetched.reactions.cache.get('⬆️');
-            const downReact = fetched.reactions.cache.get('⬇️');
-            const upCount = (upReact?.count || 0) - 1; // subtract bot's own reaction
-            const downCount = (downReact?.count || 0) - 1;
+           try {
+             const fetched = await posted.fetch();
+             const upReact = fetched.reactions.cache.get('⬆️');
+             const downReact = fetched.reactions.cache.get('⬇️');
+             const upCount = upReact ? Math.max(0, upReact.count - 1) : 0; // subtract bot's own reaction only if present
+             const downCount = downReact ? Math.max(0, downReact.count - 1) : 0;
+ 
+            // Resolve display names: prefer guild member.displayName, fallback to username
+            let sniperName = interaction.user.username;
+            let targetName = target.username;
+            try {
+              if (interaction.guild) {
+                const sniperMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+                if (sniperMember && sniperMember.displayName) sniperName = sniperMember.displayName;
+                if (targetMember && targetMember.displayName) targetName = targetMember.displayName;
+              }
+            } catch (e) {
+              // ignore and use usernames
+            }
 
-            if (upCount === downCount) {
+            if (downCount > upCount) {
               const removed = await removeLastSnipeAgainst(interaction.guildId, interaction.user.id, target.id);
               if (removed) {
-                await interaction.channel.send(`🔄 Tie vote: removed last snipe by ${interaction.user} against ${target}.`);
+                await posted.reply({
+                  content: `🔽 Vote: removed last snipe by ${sniperName} against ${targetName} (${downCount} down / ${upCount} up).`,
+                  allowedMentions: { parse: [] }
+                });
               } else {
-                await interaction.channel.send('🔄 Tie vote: no matching snipe found to remove.');
+                await posted.reply({ content: '🔽 Vote: no matching snipe found to remove.', allowedMentions: { parse: [] } });
               }
+            } else if (upCount > downCount) {
+              await posted.reply({
+                content: `✅ Vote concluded: snipe stands — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down).`,
+                allowedMentions: { parse: [] }
+              });
             } else {
-              await interaction.channel.send(`✅ Vote concluded: snipe stands (${upCount} up / ${downCount} down).`);
+              // tie — ignore (no removal). Optional short notification:
+              await posted.reply({
+                content: `ℹ️ Vote concluded: tie — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down) — no action taken.`,
+                allowedMentions: { parse: [] }
+              });
             }
-          } catch (err) {
-            console.error('Error resolving snipe vote:', err);
-          }
-        }, 1000 * 24 * 60 * 60); // 24 hours in milliseconds
+           } catch (err) {
+             console.error('Error resolving snipe vote:', err);
+           }
+        }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
