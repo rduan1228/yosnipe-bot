@@ -473,14 +473,14 @@ client.on('interactionCreate', async (interaction) => {
             } else {
               // tie — ignore (no removal). Optional short notification:
               await posted.reply({
-                content: `ℹ️ Vote concluded: tie — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down) — no action taken.`,
+                content: `ℹ️ Vote concluded: tie — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down) — vote kept...`,
                 allowedMentions: { parse: [] }
               });
             }
            } catch (err) {
              console.error('Error resolving snipe vote:', err);
            }
-        },10000); // 5 hours in milliseconds
+        }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
