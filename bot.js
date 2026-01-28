@@ -423,7 +423,6 @@ client.on('interactionCreate', async (interaction) => {
                   .setDisabled(true)
               );
               await posted.edit({ components: [disabledRow] });
-              await btn.followUp({ content: 'Voting started — reactions added.', ephemeral: true });
             } catch (err) {
               console.error('Error starting vote:', err);
               try { await btn.followUp({ content: 'Failed to start vote.', ephemeral: true }); } catch {}
@@ -481,7 +480,7 @@ client.on('interactionCreate', async (interaction) => {
            } catch (err) {
              console.error('Error resolving snipe vote:', err);
            }
-        }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
+        },10000); // 5 hours in milliseconds
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
