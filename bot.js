@@ -409,7 +409,7 @@ client.on('interactionCreate', async (interaction) => {
           voteCollector.on('collect', async (btn) => {
             if (!btn.customId.startsWith('start_vote_')) return;
             try {
-              await btn.deferReply({ ephemeral: true });
+              await btn.deferUpdate();
               const fetched = await posted.fetch();
               if (!fetched.reactions.cache.has('⬆️')) await posted.react('⬆️');
               if (!fetched.reactions.cache.has('⬇️')) await posted.react('⬇️');
