@@ -423,6 +423,44 @@ client.on('interactionCreate', async (interaction) => {
                   .setDisabled(true)
               );
               await posted.edit({ components: [disabledRow] });
+
+              // Schedule vote resolution after 5 hours only once voting has started
+              setTimeout(async () => {
+                try {
+                  const fetched = await posted.fetch();
+                  const upReact = fetched.reactions.cache.get('⬆️');
+                  const downReact = fetched.reactions.cache.get('⬇️');
+                  const upCount = upReact ? Math.max(0, upReact.count - 1) : 0;
+                  const downCount = downReact ? Math.max(0, downReact.count - 1) : 0;
+
+                  // Resolve display names: prefer guild member.displayName, fallback to username
+                  let sniperName = interaction.user.username;
+                  let targetName = target.username;
+                  try {
+                    if (interaction.guild) {
+                      const sniperMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                      const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+                      if (sniperMember && sniperMember.displayName) sniperName = sniperMember.displayName;
+                      if (targetMember && targetMember.displayName) targetName = targetMember.displayName;
+                    }
+                  } catch (e) {}
+
+                  if (downCount > upCount) {
+                    const removed = await removeLastSnipeAgainst(interaction.guildId, interaction.user.id, target.id);
+                    if (removed) {
+                      await posted.reply({ content: `🔽 Vote: removed last snipe by ${sniperName} against ${targetName} (${downCount} down / ${upCount} up).`, allowedMentions: { parse: [] } });
+                    } else {
+                      await posted.reply({ content: '🔽 Vote: no matching snipe found to remove.', allowedMentions: { parse: [] } });
+                    }
+                  } else if (upCount > downCount) {
+                    await posted.reply({ content: `✅ Vote concluded: snipe stands — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down).`, allowedMentions: { parse: [] } });
+                  } else {
+                    await posted.reply({ content: `ℹ️ Vote concluded: tie — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down) — no action taken.`, allowedMentions: { parse: [] } });
+                  }
+                } catch (err) {
+                  console.error('Error resolving snipe vote:', err);
+                }
+              }, 5 * 60 * 60 * 1000); // 5 hours
             } catch (err) {
               console.error('Error starting vote:', err);
               try { await btn.followUp({ content: 'Failed to start vote.', ephemeral: true }); } catch {}
@@ -432,55 +470,7 @@ client.on('interactionCreate', async (interaction) => {
           console.error('Failed to create vote button collector:', err);
         }
 
-         // Schedule vote resolution after 5 hours. Remove only if more downvotes; ignore ties.
-        setTimeout(async () => {
-           try {
-             const fetched = await posted.fetch();
-             const upReact = fetched.reactions.cache.get('⬆️');
-             const downReact = fetched.reactions.cache.get('⬇️');
-             const upCount = upReact ? Math.max(0, upReact.count - 1) : 0; // subtract bot's own reaction only if present
-             const downCount = downReact ? Math.max(0, downReact.count - 1) : 0;
- 
-            // Resolve display names: prefer guild member.displayName, fallback to username
-            let sniperName = interaction.user.username;
-            let targetName = target.username;
-            try {
-              if (interaction.guild) {
-                const sniperMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-                const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
-                if (sniperMember && sniperMember.displayName) sniperName = sniperMember.displayName;
-                if (targetMember && targetMember.displayName) targetName = targetMember.displayName;
-              }
-            } catch (e) {
-              // ignore and use usernames
-            }
-
-            if (downCount > upCount) {
-              const removed = await removeLastSnipeAgainst(interaction.guildId, interaction.user.id, target.id);
-              if (removed) {
-                await posted.reply({
-                  content: `🔽 Vote: removed last snipe by ${sniperName} against ${targetName} (${downCount} down / ${upCount} up).`,
-                  allowedMentions: { parse: [] }
-                });
-              } else {
-                await posted.reply({ content: '🔽 Vote: no matching snipe found to remove.', allowedMentions: { parse: [] } });
-              }
-            } else if (upCount > downCount) {
-              await posted.reply({
-                content: `✅ Vote concluded: snipe stands — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down).`,
-                allowedMentions: { parse: [] }
-              });
-            } else {
-              // tie — ignore (no removal). Optional short notification:
-              await posted.reply({
-                content: `ℹ️ Vote concluded: tie — ${sniperName} sniped ${targetName} (${upCount} up / ${downCount} down) — vote kept...`,
-                allowedMentions: { parse: [] }
-              });
-            }
-           } catch (err) {
-             console.error('Error resolving snipe vote:', err);
-           }
-        }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
+        
       } catch (error) {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
@@ -513,7 +503,6 @@ client.on('interactionCreate', async (interaction) => {
           ephemeral: true 
         });
       }
-    }
 
     if (commandName === 'snipestats') {
       const target = interaction.options.getUser('user') || interaction.user;
