@@ -8,16 +8,38 @@ const client = new Client({
   ],
 });
 
-// Initialize PostgreSQL connection
+// Initialize PostgreSQL connection with Railway-friendly settings
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+  max: 3,                      // keep pool small on free tier
+  idleTimeoutMillis: 10000,    // kill idle connections after 10s (before Railway kills them)
+  connectionTimeoutMillis: 5000,
+  allowExitOnIdle: true,
 });
+
+// Handle unexpected pool errors so they don't crash the bot
+pool.on('error', (err) => {
+  console.error('Unexpected pool error:', err.message);
+});
+
+// Retry wrapper for all DB calls
+async function withRetry(fn, retries = 3, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      console.log(`DB error (${err.code}), retrying (${i + 1}/${retries})...`);
+      await new Promise(res => setTimeout(res, delay * (i + 1)));
+    }
+  }
+}
 
 // Create tables if they don't exist
 async function initDatabase() {
   try {
-    await pool.query(`
+    await withRetry(() => pool.query(`
       CREATE TABLE IF NOT EXISTS snipes (
         id SERIAL PRIMARY KEY,
         guild_id TEXT NOT NULL,
@@ -25,7 +47,7 @@ async function initDatabase() {
         target_id TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `));
     console.log('Database initialized');
   } catch (err) {
     console.error('Error initializing database:', err);
@@ -34,34 +56,34 @@ async function initDatabase() {
 
 // Database helper functions - ALL WITH GUILD_ID
 async function recordSnipe(guildId, sniperId, targetId) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     'INSERT INTO snipes (guild_id, sniper_id, target_id) VALUES ($1, $2, $3) RETURNING id',
     [guildId, sniperId, targetId]
-  );
+  ));
   return result.rows[0].id;
 }
 
 async function removeLastSnipe(guildId, sniperId) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     'DELETE FROM snipes WHERE id = (SELECT id FROM snipes WHERE guild_id = $1 AND sniper_id = $2 ORDER BY timestamp DESC LIMIT 1) RETURNING target_id',
     [guildId, sniperId]
-  );
+  ));
   return result.rows[0];
 }
 
 async function getUserStats(guildId, userId) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT 
       (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND sniper_id = $2) as total_snipes,
       (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND target_id = $2) as times_sniped
     `,
     [guildId, userId]
-  );
+  ));
   return result.rows[0];
 }
 
 async function getTopSnipers(guildId, limit = 10) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
      WHERE guild_id = $1
@@ -69,12 +91,12 @@ async function getTopSnipers(guildId, limit = 10) {
      ORDER BY count DESC 
      LIMIT $2`,
     [guildId, limit]
-  );
+  ));
   return result.rows;
 }
 
 async function getTopVictims(guildId, limit = 10) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT target_id, COUNT(*) as count 
      FROM snipes 
      WHERE guild_id = $1
@@ -82,12 +104,12 @@ async function getTopVictims(guildId, limit = 10) {
      ORDER BY count DESC 
      LIMIT $2`,
     [guildId, limit]
-  );
+  ));
   return result.rows;
 }
 
 async function getUserTopVictims(guildId, sniperId, limit = 3) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT target_id, COUNT(*) as count 
      FROM snipes 
      WHERE guild_id = $1 AND sniper_id = $2
@@ -95,32 +117,32 @@ async function getUserTopVictims(guildId, sniperId, limit = 3) {
      ORDER BY count DESC 
      LIMIT $3`,
     [guildId, sniperId, limit]
-  );
+  ));
   return result.rows;
 }
 
 async function getSnipesHistory(guildId, offset = 0, limit = 10) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT sniper_id, target_id, timestamp 
      FROM snipes 
      WHERE guild_id = $1
      ORDER BY timestamp DESC 
      LIMIT $2 OFFSET $3`,
     [guildId, limit, offset]
-  );
+  ));
   return result.rows;
 }
 
 async function getTotalSnipesCount(guildId) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     'SELECT COUNT(*) as count FROM snipes WHERE guild_id = $1',
     [guildId]
-  );
+  ));
   return parseInt(result.rows[0].count);
 }
 
 async function getOps(guildId, userid, limit = 3) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
      WHERE guild_id = $1 AND target_id = $2
@@ -128,12 +150,12 @@ async function getOps(guildId, userid, limit = 3) {
      ORDER BY count DESC 
      LIMIT $3`,
     [guildId, userid, limit]
-  );
+  ));
   return result.rows;
 }
 
 async function getSnipeStreak(guildId, userId) {
-  const result = await pool.query(
+  const result = await withRetry(() => pool.query(
     `
     WITH last_death AS (
       SELECT MAX(id) AS last_death_id
@@ -146,7 +168,7 @@ async function getSnipeStreak(guildId, userId) {
       AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
     `,
     [guildId, userId]
-  );
+  ));
 
   return Number(result.rows[0].streak);
 }
@@ -284,7 +306,8 @@ const commands = [
     .setDescription('Show bot commands and usage'),
 ].map(command => command.toJSON());
 
-client.on('ready', async () => {
+// Fixed: renamed 'ready' to 'clientReady' to fix deprecation warning
+client.on('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   
   await initDatabase();
@@ -344,7 +367,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!interaction.guildId) {
         return interaction.reply({
           content: 'This command can only be used in a server!',
-          ephemeral: true
+          flags: 64 // ephemeral flag - fixes deprecation warning
         });
       }
 
@@ -353,14 +376,14 @@ client.on('interactionCreate', async (interaction) => {
       if (target.id === interaction.user.id) {
         return interaction.reply({ 
           content: 'You can\'t snipe yourself! 😅', 
-          ephemeral: true 
+          flags: 64
         });
       }
 
       if (target.bot) {
         return interaction.reply({ 
           content: 'You can\'t snipe bots! 🤖', 
-          ephemeral: true 
+          flags: 64
         });
       }
 
@@ -371,10 +394,9 @@ client.on('interactionCreate', async (interaction) => {
         
         await interaction.reply({ 
           content: `🎯 Snipe recorded! Total snipes: ${stats.total_snipes}`, 
-          ephemeral: true 
+          flags: 64
         });
 
-        // Simple public announcement - no voting system
         await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
         
         if (streak >= 2) {
@@ -386,7 +408,7 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Error recording snipe:', error);
         await interaction.reply({ 
           content: 'Error recording snipe. Please try again.', 
-          ephemeral: true 
+          flags: 64
         });
       }
     }
@@ -398,20 +420,20 @@ client.on('interactionCreate', async (interaction) => {
         if (!removed) {
           return interaction.reply({ 
             content: 'You have no snipes to remove!', 
-            ephemeral: true 
+            flags: 64
           });
         }
 
         const victim = await client.users.fetch(removed.target_id);
         await interaction.reply({ 
           content: `✅ Removed your last snipe against ${victim.username}`, 
-          ephemeral: true 
+          flags: 64
         });
       } catch (error) {
         console.error('Error removing snipe:', error);
         await interaction.reply({ 
           content: 'Error removing snipe. Please try again.', 
-          ephemeral: true 
+          flags: 64
         });
       }
     }
@@ -425,7 +447,7 @@ client.on('interactionCreate', async (interaction) => {
         if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
           return interaction.reply({
             content: `${target.username} has no snipe activity yet!`,
-            ephemeral: true
+            flags: 64
           });
         }
 
@@ -487,7 +509,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const components = createShowoffButton();
 
-        await interaction.reply({ embeds: [embed], ephemeral: true, components });
+        await interaction.reply({ embeds: [embed], flags: 64, components });
 
         const message = await interaction.fetchReply();
         const collector = message.createMessageComponentCollector({
@@ -503,7 +525,7 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Error fetching stats:', error);
         await interaction.reply({
           content: 'Error fetching stats. Please try again.',
-          ephemeral: true
+          flags: 64
         });
       }
     }
@@ -582,7 +604,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!opponents || opponents.length === 0) { 
           return interaction.reply({ 
             content: `${target.username} has not been sniped!`, 
-            ephemeral: true 
+            flags: 64
           });
         }
 
@@ -597,12 +619,12 @@ client.on('interactionCreate', async (interaction) => {
               }).join('\n'))
           .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: 64 });
       } catch (error) {
         console.error('Error fetching ops:', error);
         await interaction.reply({ 
           content: 'Error fetching ops. Please try again.', 
-          ephemeral: true 
+          flags: 64
         });
       }
     }
@@ -623,7 +645,7 @@ client.on('interactionCreate', async (interaction) => {
         )
         .setFooter({ text: 'Data is permanently stored in PostgreSQL database!' });
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({ embeds: [embed], flags: 64 });
     }
 
     if (commandName === 'snipehistory') {
