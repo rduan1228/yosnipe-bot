@@ -8,9 +8,6 @@ const client = new Client({
   ],
 });
 
-console.log('DB URL present:', !!process.env.DATABASE_URL);
-console.log('DB URL prefix:', process.env.DATABASE_URL?.substring(0, 30));
-
 // Initialize PostgreSQL connection with Railway-friendly settings
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
