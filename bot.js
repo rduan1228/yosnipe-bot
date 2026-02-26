@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const { Pool } = require('pg');
 
 const client = new Client({
@@ -329,7 +329,9 @@ client.on('clientReady', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+  // ─── BUTTON HANDLERS ──────────────────────────────────────────────────────
   if (interaction.isButton()) {
+    // Snipe history pagination
     const parts = interaction.customId.split('_');
     if (parts[0] === 'snipehistory') {
       const action = parts[1];
@@ -357,17 +359,35 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Error updating snipe history:', error);
         await interaction.editReply({ content: 'Error updating snipe history. Please try again.' });
       }
+      return;
+    }
+
+    // Show Off button — post the ephemeral stats embed publicly
+    if (interaction.customId === 'showoff_stats') {
+      try {
+        await interaction.deferUpdate();
+        // Fetch the original embed from the message and repost it publicly
+        const originalEmbed = interaction.message.embeds[0];
+        if (originalEmbed) {
+          await interaction.channel.send({ embeds: [originalEmbed] });
+        }
+      } catch (error) {
+        console.error('Error showing off stats:', error);
+      }
+      return;
     }
   }
   
+  // ─── SLASH COMMAND HANDLERS ───────────────────────────────────────────────
   if (interaction.isChatInputCommand()) {
     const { commandName } = interaction;
 
+    // ── /snipe ──────────────────────────────────────────────────────────────
     if (commandName === 'snipe') {
       if (!interaction.guildId) {
         return interaction.reply({
           content: 'This command can only be used in a server!',
-          flags: 64 // ephemeral flag - fixes deprecation warning
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -376,25 +396,27 @@ client.on('interactionCreate', async (interaction) => {
       if (target.id === interaction.user.id) {
         return interaction.reply({ 
           content: 'You can\'t snipe yourself! 😅', 
-          flags: 64
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       if (target.bot) {
         return interaction.reply({ 
           content: 'You can\'t snipe bots! 🤖', 
-          flags: 64
+          flags: MessageFlags.Ephemeral,
         });
       }
+
+      // FIX: defer immediately so Discord doesn't time out while DB calls run
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
         await recordSnipe(interaction.guildId, interaction.user.id, target.id);
         const stats = await getUserStats(interaction.guildId, interaction.user.id);
         const streak = await getSnipeStreak(interaction.guildId, interaction.user.id);
         
-        await interaction.reply({ 
-          content: `🎯 Snipe recorded! Total snipes: ${stats.total_snipes}`, 
-          flags: 64
+        await interaction.editReply({ 
+          content: `🎯 Snipe recorded! Total snipes: ${stats.total_snipes}`,
         });
 
         await interaction.channel.send(`🎯 ${interaction.user} just sniped ${target}! 💥`);
@@ -406,48 +428,51 @@ client.on('interactionCreate', async (interaction) => {
         }
       } catch (error) {
         console.error('Error recording snipe:', error);
-        await interaction.reply({ 
-          content: 'Error recording snipe. Please try again.', 
-          flags: 64
+        await interaction.editReply({ 
+          content: 'Error recording snipe. Please try again.',
         });
       }
+      return;
     }
 
+    // ── /unsnipe ─────────────────────────────────────────────────────────────
     if (commandName === 'unsnipe') {
+      // Defer immediately — DB call may be slow on cold start
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       try {
         const removed = await removeLastSnipe(interaction.guildId, interaction.user.id);
         
         if (!removed) {
-          return interaction.reply({ 
-            content: 'You have no snipes to remove!', 
-            flags: 64
-          });
+          return interaction.editReply({ content: 'You have no snipes to remove!' });
         }
 
         const victim = await client.users.fetch(removed.target_id);
-        await interaction.reply({ 
-          content: `✅ Removed your last snipe against ${victim.username}`, 
-          flags: 64
+        await interaction.editReply({ 
+          content: `✅ Removed your last snipe against ${victim.username}`,
         });
       } catch (error) {
         console.error('Error removing snipe:', error);
-        await interaction.reply({ 
-          content: 'Error removing snipe. Please try again.', 
-          flags: 64
+        await interaction.editReply({ 
+          content: 'Error removing snipe. Please try again.',
         });
       }
+      return;
     }
 
+    // ── /snipestats ──────────────────────────────────────────────────────────
     if (commandName === 'snipestats') {
       const target = interaction.options.getUser('user') || interaction.user;
+
+      // Defer immediately — multiple DB calls ahead
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
         const stats = await getUserStats(interaction.guildId, target.id);
 
         if (parseInt(stats.total_snipes) === 0 && parseInt(stats.times_sniped) === 0) {
-          return interaction.reply({
+          return interaction.editReply({
             content: `${target.username} has no snipe activity yet!`,
-            flags: 64
           });
         }
 
@@ -509,27 +534,22 @@ client.on('interactionCreate', async (interaction) => {
 
         const components = createShowoffButton();
 
-        await interaction.reply({ embeds: [embed], flags: 64, components });
+        // FIX: use editReply after deferReply (flags already set on defer)
+        await interaction.editReply({ embeds: [embed], components });
 
-        const message = await interaction.fetchReply();
-        const collector = message.createMessageComponentCollector({
-          filter: i => i.customId === 'showoff_stats' && i.user.id === interaction.user.id,
-          time: 60000
-        });
-
-        collector.on('collect', async i => {
-          await i.deferUpdate();
-          await interaction.channel.send({ embeds: [embed] });
-        });
+        // FIX: removed the old collector approach — the showoff button is now
+        // handled globally in the isButton() block above, so it works permanently
+        // (not just for 60s) and doesn't require fetchReply.
       } catch (error) {
         console.error('Error fetching stats:', error);
-        await interaction.reply({
+        await interaction.editReply({
           content: 'Error fetching stats. Please try again.',
-          flags: 64
         });
       }
+      return;
     }
 
+    // ── /leaderboard ─────────────────────────────────────────────────────────
     if (commandName === 'leaderboard') {
       const type = interaction.options.getString('type') || 'snipers';
 
@@ -593,18 +613,21 @@ client.on('interactionCreate', async (interaction) => {
           content: 'Error fetching leaderboard. Please try again.'
         });
       }
+      return;
     }
 
+    // ── /ops ─────────────────────────────────────────────────────────────────
     if (commandName === 'ops') {
       const target = interaction.options.getUser('user') || interaction.user;
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
         const opponents = await getOps(interaction.guildId, target.id, 3);
         
         if (!opponents || opponents.length === 0) { 
-          return interaction.reply({ 
-            content: `${target.username} has not been sniped!`, 
-            flags: 64
+          return interaction.editReply({ 
+            content: `${target.username} has not been sniped!`,
           });
         }
 
@@ -619,16 +642,17 @@ client.on('interactionCreate', async (interaction) => {
               }).join('\n'))
           .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], flags: 64 });
+        await interaction.editReply({ embeds: [embed] });
       } catch (error) {
         console.error('Error fetching ops:', error);
-        await interaction.reply({ 
-          content: 'Error fetching ops. Please try again.', 
-          flags: 64
+        await interaction.editReply({ 
+          content: 'Error fetching ops. Please try again.',
         });
       }
+      return;
     }
 
+    // ── /help ─────────────────────────────────────────────────────────────────
     if (commandName === 'help') {
       const embed = new EmbedBuilder()
         .setColor('#2196F3')
@@ -645,9 +669,11 @@ client.on('interactionCreate', async (interaction) => {
         )
         .setFooter({ text: 'Data is permanently stored in PostgreSQL database!' });
 
-      await interaction.reply({ embeds: [embed], flags: 64 });
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
     }
 
+    // ── /snipehistory ─────────────────────────────────────────────────────────
     if (commandName === 'snipehistory') {
       try {
         await interaction.deferReply({ ephemeral: false });
@@ -669,6 +695,7 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Error fetching snipe history:', error);
         await interaction.editReply({ content: 'Error fetching snipe history. Please try again.' });
       }
+      return;
     }
   }
 });
