@@ -23,6 +23,9 @@ pool.on('error', (err) => {
   console.error('Unexpected pool error:', err.message);
 });
 
+// Season cutoff for the leaderboard - only snipes on/after this date count
+const LEADERBOARD_SEASON_START = '2026-08-24T00:00:00Z';
+
 // Retry wrapper for all DB calls
 async function withRetry(fn, retries = 3, delay = 1000) {
   for (let i = 0; i < retries; i++) {
@@ -74,10 +77,10 @@ async function removeLastSnipe(guildId, sniperId) {
 async function getUserStats(guildId, userId) {
   const result = await withRetry(() => pool.query(
     `SELECT 
-      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND sniper_id = $2) as total_snipes,
-      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND target_id = $2) as times_sniped
+      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND sniper_id = $2 AND timestamp >= $3) as total_snipes,
+      (SELECT COUNT(*) FROM snipes WHERE guild_id = $1 AND target_id = $2 AND timestamp >= $3) as times_sniped
     `,
-    [guildId, userId]
+    [guildId, userId, LEADERBOARD_SEASON_START]
   ));
   return result.rows[0];
 }
@@ -86,11 +89,11 @@ async function getTopSnipers(guildId, limit = 10) {
   const result = await withRetry(() => pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
-     WHERE guild_id = $1
+     WHERE guild_id = $1 AND timestamp >= $2
      GROUP BY sniper_id 
      ORDER BY count DESC 
-     LIMIT $2`,
-    [guildId, limit]
+     LIMIT $3`,
+    [guildId, LEADERBOARD_SEASON_START, limit]
   ));
   return result.rows;
 }
@@ -99,11 +102,11 @@ async function getTopVictims(guildId, limit = 10) {
   const result = await withRetry(() => pool.query(
     `SELECT target_id, COUNT(*) as count 
      FROM snipes 
-     WHERE guild_id = $1
+     WHERE guild_id = $1 AND timestamp >= $2
      GROUP BY target_id 
      ORDER BY count DESC 
-     LIMIT $2`,
-    [guildId, limit]
+     LIMIT $3`,
+    [guildId, LEADERBOARD_SEASON_START, limit]
   ));
   return result.rows;
 }
@@ -112,11 +115,11 @@ async function getUserTopVictims(guildId, sniperId, limit = 3) {
   const result = await withRetry(() => pool.query(
     `SELECT target_id, COUNT(*) as count 
      FROM snipes 
-     WHERE guild_id = $1 AND sniper_id = $2
+     WHERE guild_id = $1 AND sniper_id = $2 AND timestamp >= $3
      GROUP BY target_id 
      ORDER BY count DESC 
-     LIMIT $3`,
-    [guildId, sniperId, limit]
+     LIMIT $4`,
+    [guildId, sniperId, LEADERBOARD_SEASON_START, limit]
   ));
   return result.rows;
 }
@@ -125,18 +128,18 @@ async function getSnipesHistory(guildId, offset = 0, limit = 10) {
   const result = await withRetry(() => pool.query(
     `SELECT sniper_id, target_id, timestamp 
      FROM snipes 
-     WHERE guild_id = $1
+     WHERE guild_id = $1 AND timestamp >= $2
      ORDER BY timestamp DESC 
-     LIMIT $2 OFFSET $3`,
-    [guildId, limit, offset]
+     LIMIT $3 OFFSET $4`,
+    [guildId, LEADERBOARD_SEASON_START, limit, offset]
   ));
   return result.rows;
 }
 
 async function getTotalSnipesCount(guildId) {
   const result = await withRetry(() => pool.query(
-    'SELECT COUNT(*) as count FROM snipes WHERE guild_id = $1',
-    [guildId]
+    'SELECT COUNT(*) as count FROM snipes WHERE guild_id = $1 AND timestamp >= $2',
+    [guildId, LEADERBOARD_SEASON_START]
   ));
   return parseInt(result.rows[0].count);
 }
@@ -145,11 +148,11 @@ async function getOps(guildId, userid, limit = 3) {
   const result = await withRetry(() => pool.query(
     `SELECT sniper_id, COUNT(*) as count 
      FROM snipes 
-     WHERE guild_id = $1 AND target_id = $2
+     WHERE guild_id = $1 AND target_id = $2 AND timestamp >= $3
      GROUP BY sniper_id 
      ORDER BY count DESC 
-     LIMIT $3`,
-    [guildId, userid, limit]
+     LIMIT $4`,
+    [guildId, userid, LEADERBOARD_SEASON_START, limit]
   ));
   return result.rows;
 }
@@ -160,14 +163,14 @@ async function getSnipeStreak(guildId, userId) {
     WITH last_death AS (
       SELECT MAX(id) AS last_death_id
       FROM snipes
-      WHERE guild_id = $1 AND target_id = $2
+      WHERE guild_id = $1 AND target_id = $2 AND timestamp >= $3
     )
     SELECT COUNT(*) AS streak
     FROM snipes
-    WHERE guild_id = $1 AND sniper_id = $2
+    WHERE guild_id = $1 AND sniper_id = $2 AND timestamp >= $3
       AND id > COALESCE((SELECT last_death_id FROM last_death), 0)
     `,
-    [guildId, userId]
+    [guildId, userId, LEADERBOARD_SEASON_START]
   ));
 
   return Number(result.rows[0].streak);
@@ -575,7 +578,7 @@ client.on('interactionCreate', async (interaction) => {
 
           const embed = new EmbedBuilder()
             .setColor('#4CAF50')
-            .setTitle('🏆 TOP SNIPERS LEADERBOARD')
+            .setTitle('🏆 2025-26 TOP SNIPERS LEADERBOARD')
             .setDescription(leaderboard.length === 0 ? 'No snipes recorded yet!' : 
               leaderboardWithUsers.join('\n'))
             .setTimestamp();
