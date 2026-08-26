@@ -578,7 +578,7 @@ client.on('interactionCreate', async (interaction) => {
 
           const embed = new EmbedBuilder()
             .setColor('#4CAF50')
-            .setTitle('🏆 2025-26 TOP SNIPERS LEADERBOARD')
+            .setTitle('🏆 2026-27 TOP SNIPERS LEADERBOARD')
             .setDescription(leaderboard.length === 0 ? 'No snipes recorded yet!' : 
               leaderboardWithUsers.join('\n'))
             .setTimestamp();
